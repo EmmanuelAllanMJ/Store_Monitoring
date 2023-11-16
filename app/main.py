@@ -37,9 +37,14 @@ async def create_upload_file(
     return crud.upload_files(db, file, table_name) 
 
 @app.get("/trigger_report")
-async def trigger_report():
-    return crud.generate_report()
+async def trigger_report(
+    db: Session = Depends(get_db)
+):
+    return crud.trigger_report(db)
 
 @app.get("/get_report")
-async def get_report():
-    return {"message": "Hello World"}
+async def get_report(
+    report_id: str,
+    db: Session = Depends(get_db)
+):
+    return crud.get_report(db, report_id)
