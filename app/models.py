@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Index, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Index, ForeignKey, Time
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -23,8 +23,8 @@ class MenuHours(Base):
     id = Column(BigInteger, primary_key = True, nullable=False)
     store_id = Column(BigInteger, ForeignKey('stores.store_id'), nullable=False)
     day = Column(BigInteger, nullable=False)
-    start_time_local = Column(DateTime, nullable=False, default="00:00:00")
-    end_time_local = Column(DateTime, nullable=False, default="23:59:59")
+    start_time_local = Column(Time, nullable=False, default="00:00:00")
+    end_time_local = Column(Time, nullable=False, default="23:59:59")
 
 
 class StoreStatus(Base):

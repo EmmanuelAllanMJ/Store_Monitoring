@@ -7,11 +7,18 @@ import datetime
 import re
 import uuid
 from sqlalchemy import func
+from fastapi import HTTPException
+from typing import List
+from datetime import datetime, timedelta, time
+# import datetime
 
 
 def upload_files(db:Session, file: UploadFile, table_name: str):
     # read the csv file and decode it
     contents = file.file.read()
+    # check if the file is a csv file
+    if file.content_type != 'text/csv':
+        raise HTTPException(status_code=400, detail='File must be of type CSV')
     reader = csv.reader(contents.decode('utf-8').splitlines(), delimiter=',')
 
     # Extract the header row
@@ -26,7 +33,7 @@ def upload_files(db:Session, file: UploadFile, table_name: str):
 
             for i, value in enumerate(row):
                 if isinstance(value, str) and re.match(r'^\d{2}:\d{2}:\d{2}$', value):
-                    row[i] = datetime.datetime.strptime(value, '%H:%M:%S')
+                    row[i] = datetime.strptime(value, '%H:%M:%S')
                 row_dict[header[i]] = value
         rows.append(row_dict)
 
@@ -47,86 +54,115 @@ def upload_files(db:Session, file: UploadFile, table_name: str):
         # "contents": rows
     }
 
-def trigger_report(db: Session):
-    today = "2023-02-01 12:09:39.388884"
-    store_id = 1481966498820158979
 
-    # Get the store_time_periods for the current store
-    store_time_periods = db.query(models.StoreStatus).filter_by(store_id=store_id, status='active').order_by(models.StoreStatus.timestamp_utc.desc()).first()
 
-    # Divide stores into batches of 1000
-    batch_size = 1000
-    stores = db.query(models.Store).all()
-    for i in range(0, len(stores), batch_size):
-        store_batch = stores[i:i+batch_size]
-        store_ids = [store.store_id for store in store_batch]
 
-        # Get last uptime and downtime for each store in the batch using subqueries
-        last_uptimes = db.query(models.StoreStatus).filter(models.StoreStatus.store_id.in_(store_ids), models.StoreStatus.status == 'inactive').order_by(models.StoreStatus.timestamp_utc.desc()).subquery()
-        last_downtimes = db.query(models.StoreStatus).filter(models.StoreStatus.store_id.in_(store_ids), models.StoreStatus.status == 'active').order_by(models.StoreStatus.timestamp_utc.desc()).subquery()
+def trigger_report(db:Session):
+    store_ids = []
+    for i in db.query(models.Store).all():
+        store_ids.append(i.store_id)
+        uptime = db.query(models.StoreStatus).filter(models.StoreStatus.store_id == i.store_id).filter(models.StoreStatus.status=='active').order_by(models.StoreStatus.timestamp_utc.desc()).first()
+        last_uptime = []
 
-        print(last_downtimes)
+        downtime = db.query(models.StoreStatus).filter(models.StoreStatus.store_id == i.store_id).filter(models.StoreStatus.status=='inactive').order_by(models.StoreStatus.timestamp_utc.desc()).first()
+        last_downtime = []
 
-        # Update last uptime and downtime in bulk for the store batch
-        db.query(models.Store).filter(models.Store.store_id.in_(store_ids)).update({models.Store.last_uptime: last_uptimes.c.timestamp_utc, models.Store.last_downtime: last_downtimes.c.timestamp_utc})
+        day_of_week = datetime.now().weekday()
+        today_time = datetime.now().time()
 
-        # Update the store_time_periods.timestamp_utc time in the store table for the batch
-        db.query(models.Store).filter(models.Store.store_id.in_(store_ids)).update({models.Store.timestamp_utc: store_time_periods.timestamp_utc})
+        # ...
 
-    db.commit()
- 
-    # Get the current timestamp
-    current_timestamp = datetime.datetime.utcnow()
-
-    # Create a subquery for the latest store status for each store
-    latest_store_status_subquery = db.query(models.StoreStatus).filter(models.StoreStatus.timestamp_utc < current_timestamp).order_by(models.StoreStatus.timestamp_utc.desc()).subquery()
-
-    # Update last_uptime and last_downtime in the store table
-    store_updates = []
-    for store in db.query(models.Store):
-        latest_status = latest_store_status_subquery.filter(latest_store_status_subquery.c.store_id == store.store_id).one_or_none()
-
-        if latest_status:
-            if latest_status.status == "Open":
-                store.last_uptime = latest_status.timestamp_utc
-                store.last_downtime = None
+        if uptime:
+            menuhours = db.query(models.MenuHours).filter(models.MenuHours.store_id == i.store_id).filter(models.MenuHours.day==day_of_week).first()
+            if menuhours and menuhours.end_time_local < uptime.timestamp_utc.time():
+                last_uptime.append(uptime.timestamp_utc)
             else:
-                store.last_downtime = latest_status.timestamp_utc
-                store.last_uptime = None
+                if menuhours:
+                    duration = sum(map(lambda f: int(f[0])*3600 + int(f[1])*60 , map(lambda f: f.split(':'), [str(uptime.timestamp_utc.time()), str(menuhours.end_time_local)])))
+                    duration_in_seconds = round(duration / 2)
+                    duration_formatted = str(timedelta(seconds=duration_in_seconds))
+                    duration_time = datetime.strptime(duration_formatted, '%H:%M:%S').time()
+                    last_uptime.append(datetime.combine(datetime.now().date(), duration_time))
+                else:
+                    last_uptime.append("No menu hours available")
         else:
-            store.last_downtime = None
-            store.last_uptime = None
+            menuhours = db.query(models.MenuHours).filter(models.MenuHours.store_id == i.store_id).filter(models.MenuHours.day==day_of_week).first()
+            if menuhours:
+                    last_uptime.append(datetime.combine(datetime.now().date(), menuhours.end_time_local))
+            else:
+                last_uptime.append("Active 24/7")
+        print("Uptime",i.store_id, last_uptime)
+        
+        if downtime:
+            menuhours = db.query(models.MenuHours).filter(models.MenuHours.store_id == i.store_id).filter(models.MenuHours.day==day_of_week).first()
+            if isinstance(last_uptime[0], time):
+                if (last_uptime[0] < today_time):
+                    last_downtime.append(datetime.combine(datetime.now().date(), today_time))
+                else:
+                    last_downtime.append(datetime.combine(datetime.now().date(), menuhours.start_time_local))
+            elif last_uptime[0] == "Active 24/7":
+                last_downtime.append(last_uptime[0])
+        # else:
+            # if menuhours and menuhours.end_time_local < downtime.timestamp_utc.time():
+            #     print(i.store_id, downtime.timestamp_utc.time())
+            # else:
+            #     if menuhours:
+            #         duration = sum(map(lambda f: int(f[0])*3600 + int(f[1])*60 , map(lambda f: f.split(':'), [str(downtime.timestamp_utc.time()), str(menuhours.end_time_local)])))
+            #         duration_in_seconds = round(duration / 2)
+            #         duration_formatted = str(timedelta(seconds=duration_in_seconds))
+            #         print(i.store_id, duration_formatted)
+            #     else:
+            #         print(i.store_id, 'No menu hours available')
+        else:
+            menuhours = db.query(models.MenuHours).filter(models.MenuHours.store_id == i.store_id).filter(models.MenuHours.day==day_of_week).first()
+            if menuhours:
+                last_downtime.append(datetime.combine(datetime.now().date(),menuhours.start_time_local))
+            else:
+                last_downtime.append("Active 24/7")
+        print("Downtime",i.store_id, last_downtime)
+        print()
 
-        store_updates.append(store)
+        # update last uptime and downtime in store table
+        i.last_uptime = last_uptime[0] if (last_uptime!=[] and isinstance(last_uptime[0], datetime)) else None
+        i.last_downtime = last_downtime[0] if (last_downtime!=[] and isinstance(last_downtime[0], datetime))  else None
+        db.commit()
+ # Get all the stores from the database
+    stores = db.query(models.Store).all()
 
-    db.add_all(store_updates)
+    report_id = uuid.uuid4()
+    for store in stores:
+        # Get the last uptime and downtime for this store
+        uptime = store.last_uptime
+        downtime = store.last_downtime
 
-    # Get uptime and downtime for the last hour, day, and week
-    uptime_last_hour = db.query(func.sum(models.StoreStatus.duration)).filter(models.StoreStatus.status == "Inactive", models.StoreStatus.timestamp_utc >= current_timestamp - datetime.timedelta(hours=1)).group_by(models.StoreStatus.store_id)
-    downtime_last_hour = db.query(func.sum(models.StoreStatus.duration)).filter(models.StoreStatus.status == "Active", models.StoreStatus.timestamp_utc >= current_timestamp - datetime.timedelta(hours=1)).group_by(models.StoreStatus.store_id)
+        # Calculate the uptime and downtime for the last hour, day, and week
+        uptime_last_hour = (datetime.now() - uptime).total_seconds() if uptime else None
+        downtime_last_hour = (datetime.now() - downtime).total_seconds() if downtime else None
 
-    uptime_last_day = db.query(func.sum(models.StoreStatus.duration)).filter(models.StoreStatus.status == "Inactive", models.StoreStatus.timestamp_utc >= current_timestamp - datetime.timedelta(days=1)).group_by(models.StoreStatus.store_id)
-    downtime_last_day = db.query(func.sum(models.StoreStatus.duration)).filter(models.StoreStatus.status == "Active", models.StoreStatus.timestamp_utc >= current_timestamp - datetime.timedelta(days=1)).group_by(models.StoreStatus.store_id)
+        uptime_last_day = (datetime.now() - uptime).total_seconds() if uptime else None
+        downtime_last_day = (datetime.now() - downtime).total_seconds() if downtime else None
 
-    uptime_last_week = db.query(func.sum(models.StoreStatus.duration)).filter(models.StoreStatus.status == "Inactive", models.StoreStatus.timestamp_utc >= current_timestamp - datetime.timedelta(weeks=1)).group_by(models.StoreStatus.store_id)
-    downtime_last_week = db.query(func.sum(models.StoreStatus.duration)).filter(models.StoreStatus.status == "Active", models.StoreStatus.timestamp_utc >= current_timestamp - datetime.timedelta(weeks=1)).group_by(models.StoreStatus.store_id)
+        uptime_last_week = (datetime.now() - uptime).total_seconds() if uptime else None
+        downtime_last_week = (datetime.now() - downtime).total_seconds() if downtime else None
 
-    # Create reports and update the store table
-    for store_id, uptime_lh, downtime_lh, uptime_ld, downtime_ld, uptime_lw, downtime_lw in zip(uptime_last_hour.keys(), uptime_last_hour, downtime_last_hour, uptime_last_day, downtime_last_day, uptime_last_week, downtime_last_week):
-        report_id = uuid.uuid4()
-        store = db.query(models.Store).filter_by(store_id=store_id).first()
+        # Create a new report with a random report_id and the calculated data
+        report = models.Report(report_id=report_id, store_id=store.store_id, 
+                                uptime_last_hour=uptime_last_hour, downtime_last_hour=downtime_last_hour,
+                                uptime_last_day=uptime_last_day, downtime_last_day=downtime_last_day,
+                                uptime_last_week=uptime_last_week, downtime_last_week=downtime_last_week)
 
-        store.report = models.Report(
-            id=report_id,
-            uptime_last_hour=uptime_lh,
-            uptime_last_day=uptime_ld,
-            uptime_last_week=uptime_lw,
-            downtime_last_hour=downtime_lh,
-            downtime_last_day=downtime_ld,
-            downtime_last_week=downtime_lw
-        )
+        # Add the new report to the session
+        db.add(report)
 
+    # Commit the session to store the reports in the database
     db.commit()
+
+    # Return a message to indicate that the report generation has been triggered
+
     return {
-        report_id
+        "report_id": report_id
     }
+
+def get_report(db: Session, report_id: str):
+    report = db.query(models.Report).filter_by(report_id=report_id).all()
+    return report

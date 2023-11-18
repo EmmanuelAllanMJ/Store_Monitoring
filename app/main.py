@@ -13,7 +13,6 @@ app = FastAPI()
 
 
 # Dependency
-@app.on_event("startup")
 def get_db():
     db = SessionLocal()
     try:
