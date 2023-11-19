@@ -60,14 +60,18 @@ def upload_files(db:Session, file: UploadFile, table_name: str):
 
 
 
-def trigger_report(db:Session):
+import concurrent.futures
+
+def trigger_report(db: Session):
     store_ids = []
     for i in db.query(models.Store).all():
         store_ids.append(i.store_id)
-        uptime = db.query(models.StoreStatus).filter(models.StoreStatus.store_id == i.store_id).filter(models.StoreStatus.status=='active').order_by(models.StoreStatus.timestamp_utc.desc()).first()
+
+    def process_store(store):
+        uptime = db.query(models.StoreStatus).filter(models.StoreStatus.store_id == store.store_id).filter(models.StoreStatus.status=='active').order_by(models.StoreStatus.timestamp_utc.desc()).first()
         last_uptime = []
 
-        downtime = db.query(models.StoreStatus).filter(models.StoreStatus.store_id == i.store_id).filter(models.StoreStatus.status=='inactive').order_by(models.StoreStatus.timestamp_utc.desc()).first()
+        downtime = db.query(models.StoreStatus).filter(models.StoreStatus.store_id == store.store_id).filter(models.StoreStatus.status=='inactive').order_by(models.StoreStatus.timestamp_utc.desc()).first()
         last_downtime = []
 
         day_of_week = datetime.now().weekday()
@@ -76,7 +80,7 @@ def trigger_report(db:Session):
         # ...
 
         if uptime:
-            menuhours = db.query(models.MenuHours).filter(models.MenuHours.store_id == i.store_id).filter(models.MenuHours.day==day_of_week).first()
+            menuhours = db.query(models.MenuHours).filter(models.MenuHours.store_id == store.store_id).filter(models.MenuHours.day==day_of_week).first()
             if menuhours and menuhours.end_time_local < uptime.timestamp_utc.time():
                 last_uptime.append(uptime.timestamp_utc)
             else:
@@ -89,15 +93,15 @@ def trigger_report(db:Session):
                 else:
                     last_uptime.append("No menu hours available")
         else:
-            menuhours = db.query(models.MenuHours).filter(models.MenuHours.store_id == i.store_id).filter(models.MenuHours.day==day_of_week).first()
+            menuhours = db.query(models.MenuHours).filter(models.MenuHours.store_id == store.store_id).filter(models.MenuHours.day==day_of_week).first()
             if menuhours:
-                    last_uptime.append(datetime.combine(datetime.now().date(), menuhours.end_time_local))
+                last_uptime.append(datetime.combine(datetime.now().date(), menuhours.end_time_local))
             else:
                 last_uptime.append("Active 24/7")
-        print("Uptime",i.store_id, last_uptime)
-        
+        # print("Uptime", store.store_id, last_uptime)
+
         if downtime:
-            menuhours = db.query(models.MenuHours).filter(models.MenuHours.store_id == i.store_id).filter(models.MenuHours.day==day_of_week).first()
+            menuhours = db.query(models.MenuHours).filter(models.MenuHours.store_id == store.store_id).filter(models.MenuHours.day==day_of_week).first()
             if isinstance(last_uptime[0], time):
                 if (last_uptime[0] < today_time):
                     last_downtime.append(datetime.combine(datetime.now().date(), today_time))
@@ -105,34 +109,29 @@ def trigger_report(db:Session):
                     last_downtime.append(datetime.combine(datetime.now().date(), menuhours.start_time_local))
             elif last_uptime[0] == "Active 24/7":
                 last_downtime.append(last_uptime[0])
-        # else:
-            # if menuhours and menuhours.end_time_local < downtime.timestamp_utc.time():
-            #     print(i.store_id, downtime.timestamp_utc.time())
-            # else:
-            #     if menuhours:
-            #         duration = sum(map(lambda f: int(f[0])*3600 + int(f[1])*60 , map(lambda f: f.split(':'), [str(downtime.timestamp_utc.time()), str(menuhours.end_time_local)])))
-            #         duration_in_seconds = round(duration / 2)
-            #         duration_formatted = str(timedelta(seconds=duration_in_seconds))
-            #         print(i.store_id, duration_formatted)
-            #     else:
-            #         print(i.store_id, 'No menu hours available')
         else:
-            menuhours = db.query(models.MenuHours).filter(models.MenuHours.store_id == i.store_id).filter(models.MenuHours.day==day_of_week).first()
+            menuhours = db.query(models.MenuHours).filter(models.MenuHours.store_id == store.store_id).filter(models.MenuHours.day==day_of_week).first()
             if menuhours:
                 last_downtime.append(datetime.combine(datetime.now().date(),menuhours.start_time_local))
             else:
                 last_downtime.append("Active 24/7")
-        print("Downtime",i.store_id, last_downtime)
+        # print("Downtime", store.store_id, last_downtime)
         print()
 
         # update last uptime and downtime in store table
-        i.last_uptime = last_uptime[0] if (last_uptime!=[] and isinstance(last_uptime[0], datetime)) else None
-        i.last_downtime = last_downtime[0] if (last_downtime!=[] and isinstance(last_downtime[0], datetime))  else None
+        store.last_uptime = last_uptime[0] if (last_uptime!=[] and isinstance(last_uptime[0], datetime)) else None
+        store.last_downtime = last_downtime[0] if (last_downtime!=[] and isinstance(last_downtime[0], datetime))  else None
         db.commit()
- # Get all the stores from the database
+
+    # Get all the stores from the database
     stores = db.query(models.Store).all()
 
     report_id = uuid.uuid4()
+
+    # Process each store using multithreading
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        executor.map(process_store, stores)
+
     for store in stores:
         # Get the last uptime and downtime for this store
         uptime = store.last_uptime
@@ -161,7 +160,6 @@ def trigger_report(db:Session):
     db.commit()
 
     # Return a message to indicate that the report generation has been triggered
-
     return {
         "report_id": report_id
     }
