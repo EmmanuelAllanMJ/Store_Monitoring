@@ -10,7 +10,10 @@ from sqlalchemy import func
 from fastapi import HTTPException
 from typing import List
 from datetime import datetime, timedelta, time
-# import datetime
+from fastapi.responses import StreamingResponse
+import io
+import csv
+from io import StringIO
 
 
 def upload_files(db:Session, file: UploadFile, table_name: str):
@@ -164,5 +167,37 @@ def trigger_report(db:Session):
     }
 
 def get_report(db: Session, report_id: str):
-    report = db.query(models.Report).filter_by(report_id=report_id).all()
-    return report
+   report = db.query(models.Report).filter_by(report_id=report_id).all()
+   csv_data = generate_csv_file(report)
+   response = StreamingResponse(
+       iter([csv_data]),
+       media_type='text/csv',
+       headers={
+           'Content-Disposition': 'attachment;filename=dataset.csv',
+           'Access-Control-Expose-Headers': 'Content-Disposition'
+       }
+   )
+   return response
+
+def generate_csv_file(reports):
+    # Convert the report to a list of dictionaries
+    report_dicts = [report.to_dict() for report in reports]
+
+    # Create a CSV file in memory
+    csv_file = StringIO()
+    fieldnames = report_dicts[0].keys()
+
+    writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+
+    # Write the headers
+    writer.writeheader()
+
+    # Write the data
+    writer.writerows(report_dicts)
+
+    # Get the CSV data as a string
+    csv_data = csv_file.getvalue()
+
+
+    print(csv_data)
+    return csv_data

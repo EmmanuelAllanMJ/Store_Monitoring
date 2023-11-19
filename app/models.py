@@ -48,3 +48,15 @@ class Report(Base):
     downtime_last_hour = Column(Integer, nullable=True)
     downtime_last_day = Column(Integer, nullable=True)
     downtime_last_week = Column(Integer, nullable=True)
+
+    def to_dict(self):
+        return {
+            "report_id": self.report_id,
+            "store_id": self.store_id,
+            "uptime_last_hour": self.uptime_last_hour,
+            "uptime_last_day": self.uptime_last_day,
+            "uptime_last_week": self.uptime_last_week,
+            "downtime_last_hour": self.downtime_last_hour,
+            "downtime_last_day": self.downtime_last_day,
+            "downtime_last_week": self.downtime_last_week
+        }
