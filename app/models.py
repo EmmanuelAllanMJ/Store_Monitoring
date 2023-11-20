@@ -17,10 +17,14 @@ class Store(Base):
     last_downtime = Column(DateTime, nullable=True)
     reports = relationship("Report", back_populates="store")
 
+
 class MenuHours(Base):
     __tablename__ = 'store_time_periods'
+    __table_args__ = (
+        Index('idx_store_time_periods_store_id', 'store_id'),
+    )
 
-    id = Column(BigInteger, primary_key = True, nullable=False)
+    id = Column(BigInteger, primary_key=True, nullable=False)
     store_id = Column(BigInteger, ForeignKey('stores.store_id'), nullable=False)
     day = Column(BigInteger, nullable=False)
     start_time_local = Column(Time, nullable=False, default="00:00:00")
@@ -28,9 +32,12 @@ class MenuHours(Base):
 
 
 class StoreStatus(Base):
-    __tablename__ = 'store_status'  
+    __tablename__ = 'store_status'
+    __table_args__ = (
+        Index('idx_store_status_store_id', 'store_id'),
+    )
 
-    id = Column(BigInteger, primary_key = True, nullable=False)
+    id = Column(BigInteger, primary_key=True, nullable=False)
     store_id = Column(BigInteger, ForeignKey('stores.store_id'), nullable=False)
     status = Column(String(255), nullable=False)
     timestamp_utc = Column(DateTime, nullable=False)
@@ -38,6 +45,10 @@ class StoreStatus(Base):
 
 class Report(Base):
     __tablename__ = 'report'
+    __table_args__ = (
+        Index('idx_report_store_id', 'store_id'),
+    )
+
     id = Column(BigInteger, primary_key=True, nullable=False)
     report_id = Column(String, nullable=False, default=uuid.uuid4())
     store_id = Column(BigInteger, ForeignKey('stores.store_id'), nullable=False)
