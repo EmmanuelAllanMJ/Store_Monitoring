@@ -6,6 +6,17 @@ import uuid
 
 
 class Store(Base):
+    """
+    Represents a store entity.
+
+    Attributes:
+        store_id (int): The ID of the store.
+        timezone_str (str): The timezone of the store.
+        last_uptime (datetime.datetime): The last uptime of the store.
+        last_downtime (datetime.datetime): The last downtime of the store.
+        reports (list): The reports of the store.
+    """
+    
     __tablename__ = 'stores'
     __table_args__ = (
         Index('idx_stores_store_id', 'store_id'),
@@ -19,6 +30,18 @@ class Store(Base):
 
 
 class MenuHours(Base):
+    """
+    Represents the menu hours for a store.
+
+    Attributes:
+        id (int): The unique identifier of the menu hours.
+        store_id (int): The ID of the store associated with the menu hours.
+        store (Store): The store object associated with the menu hours.
+        day (int): The day of the week.
+        start_time_local (datetime.time): The start time of the menu hours.
+        end_time_local (datetime.time): The end time of the menu hours.
+    """
+
     __tablename__ = 'store_time_periods'
     __table_args__ = (
         Index('idx_store_time_periods_store_id', 'store_id'),
@@ -44,6 +67,22 @@ class StoreStatus(Base):
 
 
 class Report(Base):
+    """
+    Represents a report entity.
+
+    Attributes:
+        id (int): The unique identifier of the report.
+        report_id (str): The UUID of the report.
+        store_id (int): The ID of the store associated with the report.
+        store (Store): The store object associated with the report.
+        uptime_last_hour (int): The uptime in the last hour.
+        uptime_last_day (int): The uptime in the last day.
+        uptime_last_week (int): The uptime in the last week.
+        downtime_last_hour (int): The downtime in the last hour.
+        downtime_last_day (int): The downtime in the last day.
+        downtime_last_week (int): The downtime in the last week.
+    """
+
     __tablename__ = 'report'
     __table_args__ = (
         Index('idx_report_store_id', 'store_id'),
@@ -61,6 +100,12 @@ class Report(Base):
     downtime_last_week = Column(Integer, nullable=True)
 
     def to_dict(self):
+        """
+        Converts the report object to a dictionary.
+
+        Returns:
+            dict: A dictionary representation of the report object.
+        """
         return {
             "report_id": self.report_id,
             "store_id": self.store_id,

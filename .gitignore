@@ -3,3 +3,5 @@ alembic/
 data/
 .env
 alembic.ini
+app/__pycache__/
+.pytest_cache
